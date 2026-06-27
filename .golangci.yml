@@ -1,0 +1,27 @@
+# golangci-lint v2 configuration. Strict set per the PGT Go playbook.
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - ineffassign
+    - nilnil
+    - noctx
+    - revive
+    - staticcheck
+    - unused
+  # errcheck, govet, and unused are part of the default set; staticcheck in v2
+  # bundles gosimple and stylecheck.
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jalet/whyx

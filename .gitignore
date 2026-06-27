@@ -1,0 +1,13 @@
+# Build output
+/whyx
+/dist/
+*.exe
+
+# Test / coverage
+*.out
+coverage.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

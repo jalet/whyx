@@ -1,0 +1,31 @@
+[tools]
+go = "1.26.4"
+golangci-lint = "2.10.1"
+
+[tasks.build]
+description = "Build all packages"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run tests with race detector and shuffled order"
+run = "go test -race -shuffle=on ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.fmt]
+description = "Format Go code"
+run = "golangci-lint fmt"
+
+[tasks."fmt:check"]
+description = "Check formatting without writing"
+run = "golangci-lint fmt --diff"
+
+[tasks.vuln]
+description = "Scan for known vulnerabilities"
+run = "go run golang.org/x/vuln/cmd/govulncheck@latest ./..."
+
+[tasks.ci]
+description = "Full CI gate: format check, lint, vuln, test, build"
+depends = ["fmt:check", "lint", "vuln", "test", "build"]
