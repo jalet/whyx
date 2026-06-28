@@ -24,7 +24,7 @@ file is skipped, so the delta layers are optional.
 | 3 | Tenant-wide       | `envs/<tenant>/values.yaml`                       | platform team    |
 | 4 | Environment-wide  | `envs/<tenant>/<env>/values.yaml`                 | platform team    |
 | 5 | Cluster (target)  | `envs/<tenant>/<env>/<cluster>/values.yaml`       | platform team    |
-| 6 | Infra contract    | `.../<cluster>/platform.generated.yaml`           | Pulumi (machine) |
+| 6 | Infra contract    | per-chart projection of the infra contract -- the resolved helmParameters, not the whole file (`.../<cluster>/enabled/<chart>.yaml`) | Pulumi (machine) |
 | 7 | Promoted versions | `.../<cluster>/versions.generated.yaml`           | Kargo (machine)  |
 
 A target is the path `tenant/env/cluster`. Each segment is one directory level
@@ -46,7 +46,8 @@ envs/
       values.yaml                # layer 4: applies to dev across clusters
       apps/
         values.yaml              # layer 5: this cluster only
-        platform.generated.yaml  # layer 6: written by Pulumi
+        enabled/
+          <chart>.yaml           # layer 6: per-chart contract projection (Pulumi)
         versions.generated.yaml  # layer 7: written by Kargo
 ```
 
@@ -74,7 +75,11 @@ through to the layer above.
 Layers 6 and 7 live in the cluster directory and are written by automation, not
 by hand:
 
-- `platform.generated.yaml` is the infrastructure contract emitted by Pulumi.
+- `enabled/<chart>.yaml` is the chart's ArgoCD source manifest. Layer 6 is a
+  per-chart projection of the infra contract: whyx reads this file's
+  `helmParameters` (the `--set`s ArgoCD applies) and overlays only those keys,
+  not the whole `platform.generated.yaml` bag. A chart that names no parameters
+  consumes nothing from the contract.
 - `versions.generated.yaml` carries promoted image versions from Kargo.
 
 Because they are the two highest layers, they win over hand-edited values. Do

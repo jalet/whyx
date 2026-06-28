@@ -126,6 +126,51 @@ func TestCascadeNullOverride(t *testing.T) {
 	}
 }
 
+func TestCascadeContractProjection(t *testing.T) {
+	// Layer 6 is an ArgoCD source manifest; only its named helmParameters get
+	// projected, with dotted names expanded into nested maps and values kept as
+	// strings (Helm --set never type-coerces).
+	chart := layer(t, KindFor(1), "replicas: 2\n")
+	contract := contractLayer(t, "helmParameters:\n"+
+		"  - name: defaultBackupStore.backupTarget\n    value: s3://bucket@eu-north-1/\n"+
+		"  - name: replicaCount\n    value: \"3\"\n")
+
+	steps, err := Cascade([]layers.Layer{chart, contract})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Values{
+		"replicas":           float64(2),
+		"defaultBackupStore": Values{"backupTarget": "s3://bucket@eu-north-1/"},
+		"replicaCount":       "3",
+	}
+	if diff := cmp.Diff(want, steps[1].Values); diff != "" {
+		t.Errorf("projection mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestCascadeContractProjectionEmpty(t *testing.T) {
+	// A chart that names no helmParameters (echoserver, mimir) contributes
+	// nothing from the contract layer. Empty and absent lists both yield {}.
+	for name, body := range map[string]string{
+		"empty list":   "helmParameters: []\n",
+		"missing list": "type: path\nname: echoserver\n",
+		"empty file":   "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			chart := layer(t, KindFor(1), "replicas: 2\n")
+			contract := contractLayer(t, body)
+			steps, err := Cascade([]layers.Layer{chart, contract})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if diff := cmp.Diff(Values{"replicas": float64(2)}, steps[1].Values); diff != "" {
+				t.Errorf("contract should contribute nothing (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestEffective(t *testing.T) {
 	if diff := cmp.Diff(Values{}, Effective(nil)); diff != "" {
 		t.Errorf("empty steps: %s", diff)
@@ -158,6 +203,13 @@ func layer(t *testing.T, kind layers.Kind, body string) layers.Layer {
 	t.Helper()
 	name := "L" + strings.ReplaceAll(kind.Name(), " ", "_") + ".yaml"
 	return layers.Layer{Kind: kind, Path: writeFile(t, name, body)}
+}
+
+// contractLayer builds a KindContract layer whose file is an ArgoCD source
+// manifest (the body), so Cascade projects its helmParameters.
+func contractLayer(t *testing.T, body string) layers.Layer {
+	t.Helper()
+	return layers.Layer{Kind: layers.KindContract, Path: writeFile(t, "enabled-chart.yaml", body)}
 }
 
 func writeFile(t *testing.T, name, body string) string {

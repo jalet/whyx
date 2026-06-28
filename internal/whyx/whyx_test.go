@@ -19,7 +19,7 @@ func TestRunListLayers(t *testing.T) {
 		"envs/_platform/values.yaml",
 		"envs/project/values.yaml",
 		"envs/project/dev/apps/values.yaml",
-		"envs/project/dev/apps/platform.generated.yaml",
+		"envs/project/dev/apps/enabled/backend.yaml",
 		"envs/project/dev/apps/versions.generated.yaml",
 	})
 
@@ -115,14 +115,14 @@ func TestRunCancelledContext(t *testing.T) {
 func TestWriteLayers(t *testing.T) {
 	resolved := []layers.Layer{
 		{Kind: layers.KindChartDefaults, Path: "/repo/charts/apps/backend/values.yaml"},
-		{Kind: layers.KindContract, Path: "/repo/envs/c/e/cl/platform.generated.yaml"},
+		{Kind: layers.KindContract, Path: "/repo/envs/c/e/cl/enabled/backend.yaml"},
 	}
 	var out bytes.Buffer
 	if err := writeLayers(&out, resolved); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := "1  chart defaults    chart author     /repo/charts/apps/backend/values.yaml\n" +
-		"6  infra contract    Pulumi (machine) /repo/envs/c/e/cl/platform.generated.yaml\n"
+		"6  infra contract    Pulumi (machine) /repo/envs/c/e/cl/enabled/backend.yaml\n"
 	if out.String() != want {
 		t.Errorf("output mismatch:\nwant:\n%q\ngot:\n%q", want, out.String())
 	}
@@ -171,6 +171,27 @@ func TestRunCascadeFocused(t *testing.T) {
 	}
 	if !strings.Contains(got, "~ image.tag: dev -> prod") {
 		t.Errorf("expected image.tag lineage:\n%s", got)
+	}
+}
+
+func TestRunNoHelmValueLayers(t *testing.T) {
+	// A raw-manifest (type: path) chart: no chart defaults, only empty delta
+	// files and an empty contract projection. The cascade sets nothing, so whyx
+	// prints the friendly no-layers message and exits 0 -- not an error.
+	repo := newContentFixture(t, map[string]string{
+		"charts/apps/echoserver/Chart.yaml":             "name: echoserver\n",
+		"envs/project/dev/apps/values.yaml":             "{}\n",
+		"envs/project/dev/apps/enabled/echoserver.yaml": "type: path\nhelmParameters: []\n",
+	})
+	var out bytes.Buffer
+	cfg := Config{Target: "project/dev/apps", Chart: "echoserver", RepoRoot: repo}
+	if err := Run(t.Context(), cfg, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := strings.TrimSpace(out.String())
+	want := "(no helm value layers -- raw-manifest chart)"
+	if got != want {
+		t.Errorf("want friendly message %q, got:\n%s", want, got)
 	}
 }
 

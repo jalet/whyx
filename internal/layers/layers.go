@@ -1,8 +1,9 @@
 // Package layers resolves the ordered set of value-file layers for a given
 // (target, chart): the chart defaults under charts/<category>/<chart>, the
-// envs/ delta files (_platform, tenant, env, cluster), and the machine-owned
-// platform.generated.yaml (Pulumi) and versions.generated.yaml (Kargo).
-// Missing files are skipped, since the delta layers are often absent.
+// envs/ delta files (_platform, tenant, env, cluster), the per-chart infra
+// contract projection (enabled/<chart>.yaml, Pulumi) and the machine-owned
+// versions.generated.yaml (Kargo). Missing files are skipped, since the delta
+// layers are often absent.
 package layers
 
 import (
@@ -100,6 +101,12 @@ type Layer struct {
 	Path string
 }
 
+// IsContractProjection reports whether the layer's file is the per-chart infra
+// contract (enabled/<chart>.yaml). Such a file is not raw values: it is an
+// ArgoCD source manifest whose .helmParameters must be projected into a value
+// overlay. The merge package materializes it accordingly.
+func (l Layer) IsContractProjection() bool { return l.Kind == KindContract }
+
 // Index is the canonical 1-based merge position of the layer.
 func (l Layer) Index() int { return int(l.Kind) }
 
@@ -141,7 +148,12 @@ func Resolve(repoRoot string, target Target, chart string) ([]Layer, error) {
 		{KindTenant, filepath.Join(repoRoot, "envs", target.Tenant, "values.yaml")},
 		{KindEnv, filepath.Join(repoRoot, "envs", target.Tenant, target.Env, "values.yaml")},
 		{KindCluster, filepath.Join(clusterDir, "values.yaml")},
-		{KindContract, filepath.Join(clusterDir, "platform.generated.yaml")},
+		// Layer 6 is a PER-CHART projection of the infra contract, not the whole
+		// platform.generated.yaml bag. It reads the chart's ArgoCD source manifest
+		// (enabled/<chart>.yaml) and projects only the .helmParameters that this
+		// chart actually consumes -- exactly what ArgoCD --sets. The merge package
+		// materializes the projection (see IsContractProjection).
+		{KindContract, filepath.Join(clusterDir, "enabled", chart+".yaml")},
 		{KindVersions, filepath.Join(clusterDir, "versions.generated.yaml")},
 	}
 

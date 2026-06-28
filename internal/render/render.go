@@ -85,6 +85,16 @@ func collect(steps []merge.Step, key string) []layerChanges {
 	return out
 }
 
+// anyChanges reports whether any layer contributed a change.
+func anyChanges(lcs []layerChanges) bool {
+	for _, lc := range lcs {
+		if len(lc.changes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func filterKey(changes []diff.Change, key string) []diff.Change {
 	out := make([]diff.Change, 0, len(changes))
 	for _, c := range changes {
@@ -95,9 +105,19 @@ func filterKey(changes []diff.Change, key string) []diff.Change {
 	return out
 }
 
+// _noLayersMsg is printed (and exit 0) when a chart sets no helm values at all
+// -- e.g. a raw-manifest (type: path) chart whose only layers are empty delta
+// files and an empty contract projection. "No helm values" is a valid outcome,
+// not an error.
+const _noLayersMsg = "(no helm value layers -- raw-manifest chart)"
+
 func renderDiff(w io.Writer, lcs []layerChanges, opts Options) error {
 	c := colorizer{on: opts.Color}
 	focused := opts.Key != ""
+	if !focused && !anyChanges(lcs) {
+		_, err := fmt.Fprintln(w, c.paint(_dim, _noLayersMsg))
+		return err
+	}
 	for _, lc := range lcs {
 		if focused && len(lc.changes) == 0 {
 			continue // skip layers that do not touch the focused key

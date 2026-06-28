@@ -8,6 +8,7 @@ package merge
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"helm.sh/helm/v3/pkg/chartutil"
 	"sigs.k8s.io/yaml"
@@ -35,7 +36,7 @@ func Cascade(ls []layers.Layer) ([]Step, error) {
 	steps := make([]Step, 0, len(ls))
 	cumulative := Values{}
 	for _, l := range ls {
-		vals, err := ReadValues(l.Path)
+		vals, err := layerValues(l)
 		if err != nil {
 			return nil, err
 		}
@@ -47,6 +48,77 @@ func Cascade(ls []layers.Layer) ([]Step, error) {
 		steps = append(steps, Step{Layer: l, Values: cumulative})
 	}
 	return steps, nil
+}
+
+// layerValues materializes a layer into a Values overlay. Most layers are raw
+// value files, decoded as-is. The infra-contract layer (layer 6) is special:
+// its file is the chart's ArgoCD source manifest, and only the .helmParameters
+// it names get projected into a nested overlay.
+//
+// Precedence note: ArgoCD applies helm.parameters (--set) AFTER all valueFiles,
+// so semantically the contract outranks even layer 7. We still present it as
+// layer 6 (before layer 7) because the key sets are disjoint -- contract keys
+// are infra facts (buckets/region/kms), layer 7 keys are version pins (image
+// tags) -- so no value is ever set by both and the ordering shows no inversion.
+func layerValues(l layers.Layer) (Values, error) {
+	if l.IsContractProjection() {
+		return readContractProjection(l.Path)
+	}
+	return ReadValues(l.Path)
+}
+
+// helmParameter is a single ArgoCD --set entry: a dotted name and its value.
+type helmParameter struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// sourceManifest is the slice of the ArgoCD source manifest we care about.
+type sourceManifest struct {
+	HelmParameters []helmParameter `json:"helmParameters"`
+}
+
+// readContractProjection reads enabled/<chart>.yaml and projects its
+// .helmParameters into a value overlay. Each dotted name (e.g.
+// "defaultBackupStore.backupTarget") expands into a nested map, and the value
+// is kept as a STRING -- matching Helm --set, which never type-coerces. An
+// empty or absent helmParameters list yields an empty (non-nil) overlay, so the
+// chart consumes nothing from the contract.
+func readContractProjection(path string) (Values, error) {
+	// G304: see ReadValues; the path is built by layers.Resolve within repoRoot.
+	data, err := os.ReadFile(path) //nolint:gosec
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", path, err)
+	}
+	var src sourceManifest
+	if err := yaml.Unmarshal(data, &src); err != nil {
+		return nil, fmt.Errorf("%q: %w", path, err)
+	}
+	out := Values{}
+	for _, p := range src.HelmParameters {
+		if p.Name == "" {
+			continue
+		}
+		setDotted(out, p.Name, p.Value)
+	}
+	return out, nil
+}
+
+// setDotted assigns value at the dotted path in m, creating intermediate maps
+// as needed. A non-map node along the path is overwritten with a fresh map so
+// the assignment always lands (helmParameter names are flat, non-conflicting).
+func setDotted(m Values, dotted string, value any) {
+	segs := strings.Split(dotted, ".")
+	node := m
+	for _, seg := range segs[:len(segs)-1] {
+		child, ok := node[seg].(Values)
+		if !ok {
+			child = Values{}
+			node[seg] = child
+		}
+		node = child
+	}
+	node[segs[len(segs)-1]] = value
 }
 
 // ReadValues decodes a YAML value file into a Values map. An empty or
