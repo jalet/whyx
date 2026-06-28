@@ -35,6 +35,9 @@ type Config struct {
 	Effective bool
 	// ListLayers prints the resolved layer files in order and exits.
 	ListLayers bool
+	// ChartDefaults includes the chart-defaults layer (1) in the cascade; it is
+	// hidden by default. A focused key always shows it regardless.
+	ChartDefaults bool
 	// NoColor disables ANSI color (also honored: NO_COLOR env, non-TTY stdout).
 	NoColor bool
 	// Verbose enables diagnostic logging on stderr.
@@ -87,9 +90,10 @@ func Run(ctx context.Context, cfg Config, out io.Writer) error {
 		return err
 	}
 	return render.Cascade(out, steps, render.Options{
-		Format: format,
-		Key:    cfg.Key,
-		Color:  useColor(cfg, out),
+		Format:            format,
+		Key:               cfg.Key,
+		Color:             useColor(cfg, out),
+		ShowChartDefaults: cfg.ChartDefaults,
 	})
 }
 

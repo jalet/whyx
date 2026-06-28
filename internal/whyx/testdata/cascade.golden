@@ -1,7 +1,3 @@
-@@ layer 1 · chart defaults · chart author @@
-  + image.repo: app
-  + image.tag: dev
-  + replicas: 1
 @@ layer 2 · platform-wide · platform team @@
   + common: true
 @@ layer 5 · cluster · platform team @@

@@ -107,6 +107,10 @@ type Layer struct {
 // overlay. The merge package materializes it accordingly.
 func (l Layer) IsContractProjection() bool { return l.Kind == KindContract }
 
+// IsChartDefaults reports whether the layer is the chart author's values.yaml
+// (charts/<category>/<chart>/values.yaml), the lowest-precedence layer.
+func (l Layer) IsChartDefaults() bool { return l.Kind == KindChartDefaults }
+
 // Index is the canonical 1-based merge position of the layer.
 func (l Layer) Index() int { return int(l.Kind) }
 

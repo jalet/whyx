@@ -23,9 +23,6 @@ as a git-style diff.
 
 ```console
 $ whyx project/dev/apps backend
-@@ layer 1 · chart defaults · chart author @@
-  + image.tag: dev
-  + replicas: 1
 @@ layer 5 · cluster · platform team @@
   ~ replicas: 1 -> 2
 @@ layer 7 · promoted versions · Kargo (machine) @@
@@ -41,6 +38,21 @@ Read the diff bottom-up to find the final value, top-down to see its history:
 The hunk header names the layer's merge index, kind, and owner, so you know
 which file and which team to go to. Layers that exist but change nothing for
 this chart are omitted; absent layers are skipped entirely.
+
+The chart-defaults layer (1) is hidden by default -- it is just the chart
+author's baseline, and an override still shows that baseline as the `before`
+value (here `~ replicas: 1 -> 2`). Pass `--chart-defaults` to include it:
+
+```console
+$ whyx project/dev/apps backend --chart-defaults
+@@ layer 1 · chart defaults · chart author @@
+  + image.tag: dev
+  + replicas: 1
+@@ layer 5 · cluster · platform team @@
+  ~ replicas: 1 -> 2
+@@ layer 7 · promoted versions · Kargo (machine) @@
+  ~ image.tag: dev -> prod
+```
 
 ## Trace a single key
 
@@ -59,7 +71,9 @@ $ whyx project/dev/apps backend image.tag
 ```
 
 The `=` line is your answer: the effective value and the single layer that set
-it. To edit it, change the file owned by that layer.
+it. To edit it, change the file owned by that layer. Focused mode always
+includes the chart-defaults layer (unlike the full cascade), so a value set only
+by the chart author still resolves.
 
 > **Note:** A key with a literal dot in a segment is bracket-quoted so the path
 > is unambiguous, for example `datasources["datasources.yaml"].apiVersion`. Pass
