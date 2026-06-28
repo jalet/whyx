@@ -64,7 +64,7 @@ func TestResolve(t *testing.T) {
 				"envs/project/values.yaml",
 				"envs/project/dev/values.yaml",
 				"envs/project/dev/apps/values.yaml",
-				"envs/project/dev/apps/platform.generated.yaml",
+				"envs/project/dev/apps/enabled/backend.yaml",
 				"envs/project/dev/apps/versions.generated.yaml",
 			},
 			chart: "backend",
@@ -72,6 +72,16 @@ func TestResolve(t *testing.T) {
 				KindChartDefaults, KindPlatform, KindTenant, KindEnv,
 				KindCluster, KindContract, KindVersions,
 			},
+		},
+		{
+			name: "absent enabled file skips contract layer",
+			give: []string{
+				"charts/apps/backend/values.yaml",
+				"envs/project/dev/apps/values.yaml",
+				// no enabled/backend.yaml -- contract layer is skipped
+			},
+			chart:     "backend",
+			wantKinds: []Kind{KindChartDefaults, KindCluster},
 		},
 		{
 			name: "delta-only layers skip absent files",
@@ -96,7 +106,7 @@ func TestResolve(t *testing.T) {
 			name: "category vendor",
 			give: []string{
 				"charts/vendor/some-app/values.yaml",
-				"envs/project/dev/apps/platform.generated.yaml",
+				"envs/project/dev/apps/enabled/some-app.yaml",
 			},
 			chart:     "some-app",
 			wantKinds: []Kind{KindChartDefaults, KindContract},
@@ -226,7 +236,7 @@ func wantLayers(root string, target Target, chart string, kinds []Kind) []Layer 
 		KindTenant:        filepath.Join(root, "envs", target.Tenant, "values.yaml"),
 		KindEnv:           filepath.Join(root, "envs", target.Tenant, target.Env, "values.yaml"),
 		KindCluster:       filepath.Join(clusterDir, "values.yaml"),
-		KindContract:      filepath.Join(clusterDir, "platform.generated.yaml"),
+		KindContract:      filepath.Join(clusterDir, "enabled", chart+".yaml"),
 		KindVersions:      filepath.Join(clusterDir, "versions.generated.yaml"),
 	}
 	want := make([]Layer, 0, len(kinds))

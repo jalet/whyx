@@ -25,7 +25,7 @@ For a target `tenant/env/cluster` and a chart, values merge lowest-to-highest
 | 3 | Tenant-wide       | `envs/<tenant>/values.yaml`                       | platform team    |
 | 4 | Environment-wide  | `envs/<tenant>/<env>/values.yaml`                 | platform team    |
 | 5 | Cluster (target)  | `envs/<tenant>/<env>/<cluster>/values.yaml`       | platform team    |
-| 6 | Infra contract    | `.../<cluster>/platform.generated.yaml`           | Pulumi (machine) |
+| 6 | Infra contract    | per-chart projection of the infra contract -- the resolved helmParameters, not the whole file (`.../<cluster>/enabled/<chart>.yaml`) | Pulumi (machine) |
 | 7 | Promoted versions | `.../<cluster>/versions.generated.yaml`           | Kargo (machine)  |
 
 Missing layers are skipped -- the delta layers are often absent.

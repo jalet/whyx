@@ -14,10 +14,12 @@ var update = flag.Bool("update", false, "update golden files")
 // cascade against a committed golden file. Regenerate with `go test -update`.
 func TestGoldenCascade(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml":               "replicas: 1\nimage:\n  repo: app\n  tag: dev\n",
-		"envs/_platform/values.yaml":                    "common: true\n",
-		"envs/project/dev/apps/values.yaml":             "replicas: 2\n",
-		"envs/project/dev/apps/platform.generated.yaml": "image:\n  registry: ecr.example\n",
+		"charts/apps/backend/values.yaml":   "replicas: 1\nimage:\n  repo: app\n  tag: dev\n",
+		"envs/_platform/values.yaml":        "common: true\n",
+		"envs/project/dev/apps/values.yaml": "replicas: 2\n",
+		// Layer 6 is the per-chart infra contract projection: the chart's ArgoCD
+		// source manifest, from which only the named helmParameters get projected.
+		"envs/project/dev/apps/enabled/backend.yaml":    "helmParameters:\n  - name: image.registry\n    value: ecr.example\n",
 		"envs/project/dev/apps/versions.generated.yaml": "image:\n  tag: prod\n",
 	})
 
