@@ -140,13 +140,32 @@ func TestRunCascade(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
+	// Layer 1 (chart defaults) is hidden by default; overrides still render.
+	if strings.Contains(got, "@@ layer 1") {
+		t.Errorf("chart defaults should be hidden by default:\n%s", got)
+	}
+	for _, want := range []string{
+		"@@ layer 5", "~ replicas: 1 -> 2",
+		"@@ layer 7", "~ image.tag: dev -> prod",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in cascade:\n%s", want, got)
+		}
+	}
+
+	out.Reset()
+	cfg.ChartDefaults = true
+	if err := Run(t.Context(), cfg, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got = out.String()
 	for _, want := range []string{
 		"@@ layer 1", "+ image.tag: dev", "+ replicas: 1",
 		"@@ layer 5", "~ replicas: 1 -> 2",
 		"@@ layer 7", "~ image.tag: dev -> prod",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in cascade:\n%s", want, got)
+			t.Errorf("missing %q in --chart-defaults cascade:\n%s", want, got)
 		}
 	}
 }

@@ -46,9 +46,12 @@ func TestCascadeDiffFull(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
+	// Chart defaults (layer 1) are hidden by default, but overrides in later
+	// layers still render against the default base ("~ replicas: 1 -> 2").
+	if strings.Contains(got, "layer 1") || strings.Contains(got, "chart defaults") {
+		t.Errorf("chart defaults should be hidden by default:\n%s", got)
+	}
 	for _, want := range []string{
-		"@@ layer 1 · chart defaults · chart author @@",
-		"  + image.tag: dev", "  + replicas: 1",
 		"@@ layer 5 · cluster · platform team @@", "  ~ replicas: 1 -> 2",
 		"@@ layer 7 · promoted versions · Kargo (machine) @@", "  ~ image.tag: dev -> prod",
 	} {
@@ -58,6 +61,25 @@ func TestCascadeDiffFull(t *testing.T) {
 	}
 	if strings.Contains(got, "\x1b[") {
 		t.Errorf("color disabled but ANSI codes present:\n%s", got)
+	}
+}
+
+func TestCascadeDiffChartDefaults(t *testing.T) {
+	var out bytes.Buffer
+	opts := Options{Format: FormatDiff, ShowChartDefaults: true}
+	if err := Cascade(&out, sampleSteps(), opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"@@ layer 1 · chart defaults · chart author @@",
+		"  + image.tag: dev", "  + replicas: 1",
+		"@@ layer 5 · cluster · platform team @@", "  ~ replicas: 1 -> 2",
+		"@@ layer 7 · promoted versions · Kargo (machine) @@", "  ~ image.tag: dev -> prod",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 
@@ -74,6 +96,8 @@ func TestCascadeDiffFocused(t *testing.T) {
 		t.Errorf("focused mode should skip layer 5:\n%s", got)
 	}
 	for _, want := range []string{
+		"@@ layer 1 · chart defaults · chart author @@", // origin kept in focused mode
+		"  + image.tag: dev",
 		"  ~ image.tag: dev -> prod",
 		"= image.tag: prod",
 		"set by layer 7 · promoted versions · Kargo (machine)",
@@ -125,10 +149,16 @@ func TestCascadeJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, out.String())
 	}
-	if len(got) != 3 {
-		t.Fatalf("want 3 layers, got %d", len(got))
+	// Chart defaults are hidden by default, leaving cluster + versions.
+	if len(got) != 2 {
+		t.Fatalf("want 2 layers, got %d", len(got))
 	}
-	last := got[2]
+	for _, l := range got {
+		if l.Index == 1 {
+			t.Errorf("chart defaults (layer 1) should be hidden by default: %+v", got)
+		}
+	}
+	last := got[len(got)-1]
 	if last.Index != 7 {
 		t.Errorf("last layer index: want 7, got %d", last.Index)
 	}

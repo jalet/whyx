@@ -50,18 +50,40 @@ type Options struct {
 	Format Format
 	Key    string // focused dotted key; "" renders the full cascade
 	Color  bool   // colorize the diff format (ignored by table/json)
+	// ShowChartDefaults includes the chart-defaults layer (1) in the full
+	// cascade. It is hidden by default; a focused key always shows it.
+	ShowChartDefaults bool
 }
 
 // Cascade renders the merge steps to w in the configured format.
 func Cascade(w io.Writer, steps []merge.Step, opts Options) error {
 	lcs := collect(steps, opts.Key)
+	// Hide the chart-defaults layer from the full cascade unless asked for it.
+	// A focused key keeps it: tracing a value's origin needs the default base,
+	// and a value set only by chart defaults must still resolve. The filter runs
+	// after collect so downstream layers keep diffing against the default base
+	// (an override still renders as "~ old -> new" with the default as old).
+	hidDefaults := false
+	if !opts.ShowChartDefaults && opts.Key == "" {
+		kept := lcs[:0]
+		for _, lc := range lcs {
+			if lc.step.Layer.IsChartDefaults() {
+				if len(lc.changes) > 0 {
+					hidDefaults = true
+				}
+				continue
+			}
+			kept = append(kept, lc)
+		}
+		lcs = kept
+	}
 	switch opts.Format {
 	case FormatJSON:
 		return renderJSON(w, lcs)
 	case FormatTable:
 		return renderTable(w, lcs)
 	default:
-		return renderDiff(w, lcs, opts)
+		return renderDiff(w, lcs, opts, hidDefaults)
 	}
 }
 
@@ -111,11 +133,20 @@ func filterKey(changes []diff.Change, key string) []diff.Change {
 // not an error.
 const _noLayersMsg = "(no helm value layers -- raw-manifest chart)"
 
-func renderDiff(w io.Writer, lcs []layerChanges, opts Options) error {
+// _onlyDefaultsMsg is printed when the chart-defaults layer was hidden and no
+// other layer contributed a change -- so the cascade is empty only because the
+// defaults are suppressed, not because the chart has no values.
+const _onlyDefaultsMsg = "(only chart defaults; pass --chart-defaults to show)"
+
+func renderDiff(w io.Writer, lcs []layerChanges, opts Options, hidDefaults bool) error {
 	c := colorizer{on: opts.Color}
 	focused := opts.Key != ""
 	if !focused && !anyChanges(lcs) {
-		_, err := fmt.Fprintln(w, c.paint(_dim, _noLayersMsg))
+		msg := _noLayersMsg
+		if hidDefaults {
+			msg = _onlyDefaultsMsg
+		}
+		_, err := fmt.Fprintln(w, c.paint(_dim, msg))
 		return err
 	}
 	for _, lc := range lcs {

@@ -44,6 +44,7 @@ func newRootCmd() *cobra.Command {
 	flags.StringVar(&cfg.RepoRoot, "repo", "", "path to the helm-charts repo (default: auto-detect)")
 	flags.BoolVar(&cfg.Effective, "effective", false, "print only the final merged values")
 	flags.BoolVar(&cfg.ListLayers, "layers", false, "list the resolved layer files in order")
+	flags.BoolVar(&cfg.ChartDefaults, "chart-defaults", false, "include the chart defaults layer in the cascade (hidden by default)")
 	flags.StringVar(&cfg.Format, "format", "diff", "output format: diff|table|json")
 	flags.BoolVar(&cfg.NoColor, "no-color", false, "disable colored output")
 	flags.BoolVarP(&cfg.Verbose, "verbose", "v", false, "verbose diagnostics on stderr")

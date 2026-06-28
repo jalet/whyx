@@ -39,21 +39,22 @@ whyx <target> <chart> [key] [flags]
   <chart>       chart name             e.g. backend
   [key]         dotted path to trace   e.g. image.tag  (omit = full cascade)
 
-  --repo        path to the helm-charts repo (default: auto-detect)
-  --effective   print only the final merged values
-  --layers      list the resolved layer files in order
-  --format      diff | table | json   (default: diff)
-  --no-color    disable colored output (also honors NO_COLOR, non-TTY)
-  -v, --verbose verbose diagnostics on stderr
+  --repo            path to the helm-charts repo (default: auto-detect)
+  --effective       print only the final merged values
+  --layers          list the resolved layer files in order
+  --chart-defaults  include the chart defaults layer in the cascade (hidden by default)
+  --format          diff | table | json   (default: diff)
+  --no-color        disable colored output (also honors NO_COLOR, non-TTY)
+  -v, --verbose     verbose diagnostics on stderr
 ```
 
-Full cascade -- which layer set each value:
+Full cascade -- which layer set each value. The chart-defaults layer (1) is
+hidden by default so the focus stays on what the platform and machine layers
+change; overrides still show the default as the `before` value. Pass
+`--chart-defaults` to include layer 1, and a focused key always shows it.
 
 ```console
 $ whyx project/dev/apps backend
-@@ layer 1 · chart defaults · chart author @@
-  + image.tag: dev
-  + replicas: 1
 @@ layer 5 · cluster · platform team @@
   ~ replicas: 1 -> 2
 @@ layer 7 · promoted versions · Kargo (machine) @@
