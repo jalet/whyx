@@ -74,11 +74,6 @@ func TestRunErrors(t *testing.T) {
 			cfg:     Config{Target: "project/dev/apps", Chart: "ghost", RepoRoot: repo, ListLayers: true},
 			wantErr: layers.ErrChartNotFound,
 		},
-		{
-			name:    "no value files",
-			cfg:     Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: t.TempDir(), ListLayers: true},
-			wantErr: layers.ErrChartNotFound, // empty repo: chart dir missing
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -211,6 +206,34 @@ func TestRunNoHelmValueLayers(t *testing.T) {
 	want := "(no helm value layers -- raw-manifest chart)"
 	if got != want {
 		t.Errorf("want friendly message %q, got:\n%s", want, got)
+	}
+}
+
+func TestRunNoValueFiles(t *testing.T) {
+	// A valid repo root where the chart resolves (its dir exists) but no value
+	// file exists for it at any layer must yield ErrNoLayers -- distinct from a
+	// missing chart or a missing repo.
+	repo := newFixture(t, []string{
+		"charts/apps/backend/Chart.yaml",     // chart dir exists, but no values.yaml
+		"envs/project/dev/other/values.yaml", // makes envs/ exist; wrong target
+	})
+	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: repo, ListLayers: true}
+	if err := Run(t.Context(), cfg, &bytes.Buffer{}); !errors.Is(err, layers.ErrNoLayers) {
+		t.Fatalf("want ErrNoLayers, got %v", err)
+	}
+}
+
+func TestRunExplicitRepoNotFound(t *testing.T) {
+	// An explicit --repo that is not a helm-charts root must fail clearly with
+	// ErrRepoNotFound, not the misleading "chart not found" from later lookup.
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: missing}
+	err := Run(t.Context(), cfg, &bytes.Buffer{})
+	if !errors.Is(err, layers.ErrRepoNotFound) {
+		t.Fatalf("want ErrRepoNotFound, got %v", err)
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error should name the bad path %q, got %v", missing, err)
 	}
 }
 

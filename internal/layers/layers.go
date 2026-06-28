@@ -177,6 +177,17 @@ func Resolve(repoRoot string, target Target, chart string) ([]Layer, error) {
 	return resolved, nil
 }
 
+// CheckRepoRoot verifies that root is a helm-charts repo root: a directory
+// holding both charts/ and envs/. Use it to validate an explicitly supplied
+// --repo path, which -- unlike FindRepoRoot's auto-detection -- is otherwise
+// trusted blindly, turning a wrong path into a misleading "chart not found".
+func CheckRepoRoot(root string) error {
+	if dirExists(filepath.Join(root, "charts")) && dirExists(filepath.Join(root, "envs")) {
+		return nil
+	}
+	return fmt.Errorf("%q: %w", root, ErrRepoNotFound)
+}
+
 // FindRepoRoot walks up from start until it finds a directory containing both
 // charts/ and envs/, returning that directory.
 func FindRepoRoot(start string) (string, error) {
