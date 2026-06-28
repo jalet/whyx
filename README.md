@@ -88,7 +88,11 @@ files. Dotted keys with literal dots are bracket-quoted in output, e.g.
 ## Install
 
 ```sh
+# latest tagged release (recommended once v0.1.0 is published)
 go install github.com/jalet/whyx/cmd/whyx@latest
+
+# or pin a specific version
+go install github.com/jalet/whyx/cmd/whyx@v0.1.0
 ```
 
 ## Development
@@ -116,6 +120,18 @@ internal/merge/     Helm-faithful incremental coalescing
 internal/diff/      per-step structured value diff
 internal/render/    diff | table | json output
 ```
+
+## Releases
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please).
+Pushes to `main` maintain a release PR; merging it tags the version, publishes a
+GitHub Release, and updates [CHANGELOG.md](CHANGELOG.md).
+
+Versioning is driven by [Conventional Commits](https://www.conventionalcommits.org):
+
+- `fix:` -- patch bump (0.1.0 -> 0.1.1)
+- `feat:` -- minor bump (0.1.0 -> 0.2.0)
+- `feat!:` or a `BREAKING CHANGE:` footer -- major bump (0.1.0 -> 1.0.0)
 
 ## License
 
