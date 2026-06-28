@@ -186,6 +186,28 @@ func TestFindRepoRoot(t *testing.T) {
 	}
 }
 
+func TestCheckRepoRoot(t *testing.T) {
+	root := newFixture(t, []string{
+		"charts/apps/backend/values.yaml",
+		"envs/project/dev/apps/values.yaml",
+	})
+	if err := CheckRepoRoot(root); err != nil {
+		t.Errorf("valid repo root: unexpected error %v", err)
+	}
+
+	// A path missing charts/ and envs/ (here: never created) must be rejected.
+	missing := filepath.Join(t.TempDir(), "nope")
+	if err := CheckRepoRoot(missing); !errors.Is(err, ErrRepoNotFound) {
+		t.Errorf("want ErrRepoNotFound, got %v", err)
+	}
+
+	// A directory with charts/ but no envs/ is not a repo root.
+	half := newFixture(t, []string{"charts/apps/backend/values.yaml"})
+	if err := CheckRepoRoot(half); !errors.Is(err, ErrRepoNotFound) {
+		t.Errorf("charts/ only: want ErrRepoNotFound, got %v", err)
+	}
+}
+
 func FuzzParseTarget(f *testing.F) {
 	for _, seed := range []string{"project/dev/apps", "a/b", "", "x//y", "a/../b"} {
 		f.Add(seed)

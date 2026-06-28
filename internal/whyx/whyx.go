@@ -65,6 +65,10 @@ func Run(ctx context.Context, cfg Config, out io.Writer) error {
 		if repoRoot, err = layers.FindRepoRoot(cwd); err != nil {
 			return err
 		}
+	} else if err := layers.CheckRepoRoot(repoRoot); err != nil {
+		// An explicit --repo is trusted as-is; verify it actually is a repo root
+		// so a wrong path fails clearly rather than as "chart not found".
+		return err
 	}
 
 	resolved, err := layers.Resolve(repoRoot, target, cfg.Chart)
