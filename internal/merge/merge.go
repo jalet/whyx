@@ -8,6 +8,7 @@ package merge
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -27,98 +28,166 @@ type Step struct {
 	Values Values
 }
 
-// Cascade reads each layer's value file and merges them in order. The snapshot
-// in each Step is the result of merging that layer over all earlier ones.
+// Cascade merges the value layers in order, returning the cumulative merged
+// values after each layer so the diff package can show what every layer changed.
+// Human layers (chart defaults + env deltas) have their {{ }} templated leaves
+// stripped; the computed infra-contract layer resolves those templates against
+// ctx (built by BuildContext from the globals chain + platform.generated.yaml)
+// and surfaces the resolved values there. The versions layer (Kargo) is read
+// as-is.
 //
 // Snapshots are read-only: later steps may share unmodified submaps with
 // earlier ones, so callers must not mutate Step.Values.
-func Cascade(ls []layers.Layer) ([]Step, error) {
+func Cascade(ls []layers.Layer, ctx Values) ([]Step, error) {
 	steps := make([]Step, 0, len(ls))
 	cumulative := Values{}
 	for _, l := range ls {
-		vals, err := layerValues(l)
+		overlay, err := layerOverlay(l, ls, ctx)
 		if err != nil {
 			return nil, err
 		}
 		// MergeTables(dst, src) treats dst as authoritative, so the new layer
-		// (vals) wins over everything merged so far (cumulative). This call
-		// mutates only vals; cumulative -- and thus earlier snapshots -- is read
-		// but never written.
-		cumulative = chartutil.MergeTables(vals, cumulative)
+		// (overlay) wins over everything merged so far (cumulative). It mutates
+		// only overlay; earlier snapshots are read but never written.
+		cumulative = chartutil.MergeTables(overlay, cumulative)
 		steps = append(steps, Step{Layer: l, Values: cumulative})
 	}
 	return steps, nil
 }
 
-// layerValues materializes a layer into a Values overlay. Most layers are raw
-// value files, decoded as-is. The infra-contract layer (layer 6) is special:
-// its file is the chart's ArgoCD source manifest, and only the .helmParameters
-// it names get projected into a nested overlay.
+// layerOverlay materializes a single layer's overlay. The infra-contract layer
+// (l.IsContract) is COMPUTED: it resolves the {{ }} template refs accumulated
+// across the human layers against ctx, contributing only those resolved keys.
+// The versions layer is read verbatim. Every other (human) layer is read and has
+// its templated leaves stripped, so an unresolved {{ }} placeholder never shows
+// at the human layer -- its concrete value appears at the contract layer instead.
 //
-// Precedence note: ArgoCD applies helm.parameters (--set) AFTER all valueFiles,
-// so semantically the contract outranks even layer 7. We still present it as
-// layer 6 (before layer 7) because the key sets are disjoint -- contract keys
-// are infra facts (buckets/region/kms), layer 7 keys are version pins (image
-// tags) -- so no value is ever set by both and the ordering shows no inversion.
-func layerValues(l layers.Layer) (Values, error) {
-	if l.IsContractProjection() {
-		return readContractProjection(l.Path)
+// Precedence note: the contract layer's keys are infra facts resolved from the
+// human layers' templates; layer 7 keys are version pins (image tags). The two
+// key sets are disjoint, so no value is ever set by both and the layer-6-before-7
+// ordering shows no inversion.
+func layerOverlay(l layers.Layer, ls []layers.Layer, ctx Values) (Values, error) {
+	if l.IsContract() {
+		raw, err := mergeHumanRaw(ls)
+		if err != nil {
+			return nil, err
+		}
+		return resolveTemplatedOverlay(raw, ctx), nil
 	}
-	return ReadValues(l.Path)
-}
-
-// helmParameter is a single ArgoCD --set entry: a dotted name and its value.
-type helmParameter struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// sourceManifest is the slice of the ArgoCD source manifest we care about.
-type sourceManifest struct {
-	HelmParameters []helmParameter `json:"helmParameters"`
-}
-
-// readContractProjection reads enabled/<chart>.yaml and projects its
-// .helmParameters into a value overlay. Each dotted name (e.g.
-// "defaultBackupStore.backupTarget") expands into a nested map, and the value
-// is kept as a STRING -- matching Helm --set, which never type-coerces. An
-// empty or absent helmParameters list yields an empty (non-nil) overlay, so the
-// chart consumes nothing from the contract.
-func readContractProjection(path string) (Values, error) {
-	// G304: see ReadValues; the path is built by layers.Resolve within repoRoot.
-	data, err := os.ReadFile(path) //nolint:gosec
+	vals, err := ReadValues(l.Path)
 	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", path, err)
+		return nil, err
 	}
-	var src sourceManifest
-	if err := yaml.Unmarshal(data, &src); err != nil {
-		return nil, fmt.Errorf("%q: %w", path, err)
+	if l.Kind != layers.KindVersions {
+		stripTemplated(vals)
 	}
-	out := Values{}
-	for _, p := range src.HelmParameters {
-		if p.Name == "" {
+	return vals, nil
+}
+
+// mergeHumanRaw merges the human layers (chart defaults + env deltas) in order
+// WITHOUT stripping templates -- the raw view the contract layer resolves from.
+func mergeHumanRaw(ls []layers.Layer) (Values, error) {
+	raw := Values{}
+	for _, l := range ls {
+		if l.IsContract() || l.Kind == layers.KindVersions {
 			continue
 		}
-		setDotted(out, p.Name, p.Value)
+		v, err := ReadValues(l.Path)
+		if err != nil {
+			return nil, err
+		}
+		raw = chartutil.MergeTables(v, raw)
 	}
-	return out, nil
+	return raw, nil
 }
 
-// setDotted assigns value at the dotted path in m, creating intermediate maps
-// as needed. A non-map node along the path is overwritten with a fresh map so
-// the assignment always lands (helmParameter names are flat, non-conflicting).
-func setDotted(m Values, dotted string, value any) {
-	segs := strings.Split(dotted, ".")
-	node := m
-	for _, seg := range segs[:len(segs)-1] {
-		child, ok := node[seg].(Values)
-		if !ok {
-			child = Values{}
-			node[seg] = child
+// stripTemplated recursively deletes string leaves containing a Go-template ref
+// ("{{") from v, and prunes any map left empty as a result. A human value layer
+// may reference a contract fact via such a template; the concrete value is
+// supplied by the contract layer (resolved/<chart>.yaml), so the placeholder is
+// hidden at the human layer.
+func stripTemplated(v Values) {
+	for k, val := range v {
+		switch t := val.(type) {
+		case string:
+			if strings.Contains(t, "{{") {
+				delete(v, k)
+			}
+		case map[string]any:
+			stripTemplated(t)
+			if len(t) == 0 {
+				delete(v, k)
+			}
 		}
-		node = child
 	}
-	node[segs[len(segs)-1]] = value
+}
+
+// templateRef matches a Go-template field ref like "{{ .buckets.longhorn }}".
+var templateRef = regexp.MustCompile(`\{\{\s*\.([a-zA-Z0-9_.]+)\s*\}\}`)
+
+// resolveTemplatedOverlay returns an overlay holding only the leaves in raw whose
+// string value carries a {{ }} template, each resolved against ctx. This is the
+// infra contract's contribution: the env layers' templated refs (e.g.
+// "s3://{{ .buckets.longhorn }}@{{ .global.region }}/") materialized to concrete
+// values. Maps are recursed; a map with no templated leaf contributes nothing.
+func resolveTemplatedOverlay(raw, ctx Values) Values {
+	out := Values{}
+	for k, val := range raw {
+		switch t := val.(type) {
+		case string:
+			if strings.Contains(t, "{{") {
+				out[k] = resolveTemplate(t, ctx)
+			}
+		case map[string]any:
+			if child := resolveTemplatedOverlay(t, ctx); len(child) > 0 {
+				out[k] = child
+			}
+		}
+	}
+	return out
+}
+
+// resolveTemplate substitutes each {{ .a.b }} ref in s with the dotted value
+// from ctx (rendered with fmt). An unresolved ref is left intact, so a missing
+// contract key is visible rather than silently blanked.
+func resolveTemplate(s string, ctx Values) string {
+	return templateRef.ReplaceAllStringFunc(s, func(m string) string {
+		path := templateRef.FindStringSubmatch(m)[1]
+		v := getPath(ctx, strings.Split(path, "."))
+		if v == nil {
+			return m
+		}
+		return fmt.Sprint(v)
+	})
+}
+
+// getPath returns the value at the dotted segments in m, or nil if any segment
+// is missing or traverses a non-map.
+func getPath(m Values, segs []string) any {
+	var cur any = m
+	for _, s := range segs {
+		mm, ok := cur.(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = mm[s]
+	}
+	return cur
+}
+
+// BuildContext deep-merges the context source files in order (later wins) into
+// the map used to resolve {{ }} refs: the globals.yaml chain overlaid by the
+// infra contract platform.generated.yaml (see layers.ContextPaths).
+func BuildContext(paths []string) (Values, error) {
+	ctx := Values{}
+	for _, p := range paths {
+		v, err := ReadValues(p)
+		if err != nil {
+			return nil, err
+		}
+		ctx = chartutil.MergeTables(v, ctx)
+	}
+	return ctx, nil
 }
 
 // ReadValues decodes a YAML value file into a Values map. An empty or
