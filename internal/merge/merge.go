@@ -1,5 +1,5 @@
 // Package merge coalesces the value layers in order, replicating Helm's -f
-// precedence by applying helm.sh/helm/v3/pkg/chartutil.MergeTables to each
+// precedence by applying helm.sh/helm/v4/pkg/chart/common/util.MergeTables to each
 // layer in turn (the new layer is authoritative, maps deep-merge, lists and
 // scalars replace). It returns the cumulative merged values after each layer so
 // the diff package can show what every layer changed.
@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"helm.sh/helm/v3/pkg/chartutil"
+	helmutil "helm.sh/helm/v4/pkg/chart/common/util"
 	"sigs.k8s.io/yaml"
 
 	"github.com/jalet/whyx/internal/layers"
@@ -49,7 +49,7 @@ func Cascade(ls []layers.Layer, ctx Values, chart string) ([]Step, error) {
 		// MergeTables(dst, src) treats dst as authoritative, so the new layer
 		// (overlay) wins over everything merged so far (cumulative). It mutates
 		// only overlay; earlier snapshots are read but never written.
-		cumulative = chartutil.MergeTables(overlay, cumulative)
+		cumulative = helmutil.MergeTables(overlay, cumulative)
 		steps = append(steps, Step{Layer: l, Values: cumulative})
 	}
 	return steps, nil
@@ -108,7 +108,7 @@ func mergeHumanRaw(ls []layers.Layer) (Values, error) {
 		if err != nil {
 			return nil, err
 		}
-		raw = chartutil.MergeTables(v, raw)
+		raw = helmutil.MergeTables(v, raw)
 	}
 	return raw, nil
 }
@@ -197,7 +197,7 @@ func BuildContext(paths []string) (Values, error) {
 		if err != nil {
 			return nil, err
 		}
-		ctx = chartutil.MergeTables(v, ctx)
+		ctx = helmutil.MergeTables(v, ctx)
 	}
 	return ctx, nil
 }
