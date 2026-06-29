@@ -61,7 +61,7 @@ func TestCascade(t *testing.T) {
 	l2 := layer(t, KindFor(2), "replicas: 2\nimage:\n  tag: stage\nextra: true\n")
 	l3 := layer(t, KindFor(3), "ports:\n  - 8080\n  - 8443\nimage:\n  tag: prod\n")
 
-	steps, err := Cascade([]layers.Layer{l1, l2, l3}, Values{})
+	steps, err := Cascade([]layers.Layer{l1, l2, l3}, Values{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestCascadeSnapshotsAreStable(t *testing.T) {
 	l1 := layer(t, KindFor(1), "image:\n  repo: app\n  tag: dev\n")
 	l2 := layer(t, KindFor(2), "image:\n  tag: prod\n  extra: x\n")
 
-	steps, err := Cascade([]layers.Layer{l1, l2}, Values{})
+	steps, err := Cascade([]layers.Layer{l1, l2}, Values{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestCascadeNullOverride(t *testing.T) {
 	// A later layer setting a key to null wins (value becomes nil).
 	l1 := layer(t, KindFor(1), "feature: enabled\n")
 	l2 := layer(t, KindFor(2), "feature: null\n")
-	steps, err := Cascade([]layers.Layer{l1, l2}, Values{})
+	steps, err := Cascade([]layers.Layer{l1, l2}, Values{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestCascadeContractResolvesTemplates(t *testing.T) {
 	human := layer(t, KindFor(5), "replicas: 2\nbackup:\n  target: \"s3://{{ .buckets.x }}@{{ .global.region }}/\"\n")
 	ctx := Values{"buckets": Values{"x": "bkt"}, "global": Values{"region": "eu-north-1"}}
 
-	steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, ctx)
+	steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, ctx, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,12 +147,37 @@ func TestCascadeContractResolvesTemplates(t *testing.T) {
 	}
 }
 
+func TestCascadeContractFiltersToChart(t *testing.T) {
+	// Env-level values.yaml files namespace values under the chart name. The
+	// contract layer must only surface resolved templates for the queried chart,
+	// not for other charts that share the same values file.
+	body := "longhorn:\n  backup:\n    target: \"s3://{{ .buckets.longhorn }}/\"\nother-chart:\n  setting: \"{{ .other }}\"\n"
+	human := layer(t, KindFor(5), body)
+	ctx := Values{"buckets": Values{"longhorn": "bkt"}, "other": "val"}
+
+	steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, ctx, "longhorn")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Values{
+		"longhorn": Values{
+			"backup": Values{"target": "s3://bkt/"},
+		},
+	}
+	if diff := cmp.Diff(want, steps[1].Values); diff != "" {
+		t.Errorf("contract should only include queried chart (-want +got):\n%s", diff)
+	}
+	if _, ok := steps[1].Values["other-chart"]; ok {
+		t.Error("contract must not include other-chart keys")
+	}
+}
+
 func TestCascadeContractEmpty(t *testing.T) {
 	// No templated refs in the human layers -> the contract layer contributes
 	// nothing (and an unresolved ref is left intact when ctx lacks the key).
 	t.Run("no templates", func(t *testing.T) {
 		human := layer(t, KindFor(5), "replicas: 2\n")
-		steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, Values{})
+		steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, Values{}, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -162,7 +187,7 @@ func TestCascadeContractEmpty(t *testing.T) {
 	})
 	t.Run("unresolved ref left intact", func(t *testing.T) {
 		human := layer(t, KindFor(5), "target: \"{{ .missing.key }}\"\n")
-		steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, Values{})
+		steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, Values{}, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -177,7 +202,7 @@ func TestCascadeStripsTemplatedHumanLayers(t *testing.T) {
 	// (and any map left empty pruned), so the unresolved placeholder never shows
 	// at the human layer.
 	human := layer(t, KindFor(5), "image:\n  tag: v1\nbackup:\n  target: \"s3://{{ .buckets.x }}/\"\n")
-	steps, err := Cascade([]layers.Layer{human}, Values{})
+	steps, err := Cascade([]layers.Layer{human}, Values{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -14,14 +14,18 @@ var update = flag.Bool("update", false, "update golden files")
 // cascade against a committed golden file. Regenerate with `go test -update`.
 func TestGoldenCascade(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml": "replicas: 1\nimage:\n  repo: app\n  tag: dev\n",
-		"envs/_platform/values.yaml":      "common: true\n",
-		// The cluster layer sets image.registry from a contract template; the
-		// templated leaf is stripped from layer 5 and surfaces (resolved) at the
-		// computed infra-contract layer (layer 6), using platform.generated.yaml.
-		"envs/project/dev/apps/values.yaml":             "replicas: 2\nimage:\n  registry: \"{{ .registry }}\"\n",
-		"envs/project/dev/apps/platform.generated.yaml": "registry: ecr.example\n",
-		"envs/project/dev/apps/versions/backend.yaml":   "image:\n  tag: prod\n",
+		// All env layers (including chart defaults) namespace values under the
+		// dep alias (wrapper chart pattern). The cluster layer sets
+		// backend.image.registry from a contract template; that leaf is stripped
+		// from layer 5 and surfaces (resolved) at the computed infra-contract
+		// layer (layer 6), using platform.generated.yaml. The contract layer is
+		// filtered to only this chart's subtree so templates from co-tenants in
+		// the shared values.yaml do not leak through.
+		"charts/apps/backend/values.yaml":               "backend:\n  replicas: 1\n  image:\n    repo: app\n    tag: dev\n",
+		"envs/_platform/values.yaml":                    "common: true\n",
+		"envs/project/dev/apps/values.yaml":             "backend:\n  replicas: 2\n  image:\n    registry: \"{{ .registry }}\"\nother-chart:\n  setting: \"{{ .other }}\"\n",
+		"envs/project/dev/apps/platform.generated.yaml": "registry: ecr.example\nother: ignored\n",
+		"envs/project/dev/apps/versions/backend.yaml":   "backend:\n  image:\n    tag: prod\n",
 	})
 
 	var out bytes.Buffer
