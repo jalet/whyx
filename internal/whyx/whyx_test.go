@@ -125,9 +125,9 @@ func TestWriteLayers(t *testing.T) {
 
 func TestRunCascade(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml":             "replicas: 1\nimage:\n  tag: dev\n",
-		"envs/project/dev/apps/values.yaml":           "replicas: 2\n",
-		"envs/project/dev/apps/versions/backend.yaml": "image:\n  tag: prod\n",
+		"charts/apps/backend/values.yaml":             "backend:\n  replicas: 1\n  image:\n    tag: dev\n",
+		"envs/project/dev/apps/values.yaml":           "backend:\n  replicas: 2\n",
+		"envs/project/dev/apps/versions/backend.yaml": "backend:\n  image:\n    tag: prod\n",
 	})
 	var out bytes.Buffer
 	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: repo}
@@ -140,8 +140,8 @@ func TestRunCascade(t *testing.T) {
 		t.Errorf("chart defaults should be hidden by default:\n%s", got)
 	}
 	for _, want := range []string{
-		"@@ layer 5", "~ replicas: 1 -> 2",
-		"@@ layer 7", "~ image.tag: dev -> prod",
+		"@@ layer 5", "~ backend.replicas: 1 -> 2",
+		"@@ layer 7", "~ backend.image.tag: dev -> prod",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in cascade:\n%s", want, got)
@@ -155,9 +155,9 @@ func TestRunCascade(t *testing.T) {
 	}
 	got = out.String()
 	for _, want := range []string{
-		"@@ layer 1", "+ image.tag: dev", "+ replicas: 1",
-		"@@ layer 5", "~ replicas: 1 -> 2",
-		"@@ layer 7", "~ image.tag: dev -> prod",
+		"@@ layer 1", "+ backend.image.tag: dev", "+ backend.replicas: 1",
+		"@@ layer 5", "~ backend.replicas: 1 -> 2",
+		"@@ layer 7", "~ backend.image.tag: dev -> prod",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in --chart-defaults cascade:\n%s", want, got)
@@ -167,23 +167,23 @@ func TestRunCascade(t *testing.T) {
 
 func TestRunCascadeFocused(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml":             "replicas: 1\nimage:\n  tag: dev\n",
-		"envs/project/dev/apps/values.yaml":           "replicas: 2\n",
-		"envs/project/dev/apps/versions/backend.yaml": "image:\n  tag: prod\n",
+		"charts/apps/backend/values.yaml":             "backend:\n  replicas: 1\n  image:\n    tag: dev\n",
+		"envs/project/dev/apps/values.yaml":           "backend:\n  replicas: 2\n",
+		"envs/project/dev/apps/versions/backend.yaml": "backend:\n  image:\n    tag: prod\n",
 	})
 	var out bytes.Buffer
-	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: repo, Key: "image.tag"}
+	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: repo, Key: "backend.image.tag"}
 	if err := Run(t.Context(), cfg, &out); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
 	if strings.Contains(got, "replicas") {
-		t.Errorf("focused image.tag should not mention replicas:\n%s", got)
+		t.Errorf("focused backend.image.tag should not mention replicas:\n%s", got)
 	}
 	if strings.Contains(got, "layer 5") {
 		t.Errorf("focused mode should skip layer 5 (only touches replicas):\n%s", got)
 	}
-	if !strings.Contains(got, "~ image.tag: dev -> prod") {
+	if !strings.Contains(got, "~ backend.image.tag: dev -> prod") {
 		t.Errorf("expected image.tag lineage:\n%s", got)
 	}
 }

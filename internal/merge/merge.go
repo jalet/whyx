@@ -68,23 +68,11 @@ func Cascade(ls []layers.Layer, ctx Values, chart string) ([]Step, error) {
 // ordering shows no inversion.
 func layerOverlay(l layers.Layer, ls []layers.Layer, ctx Values, chart string) (Values, error) {
 	if l.IsContract() {
-		raw, err := mergeHumanRaw(ls)
+		raw, err := mergeHumanRaw(ls, chart)
 		if err != nil {
 			return nil, err
 		}
-		resolved := resolveTemplatedOverlay(raw, ctx)
-		if chart == "" {
-			return resolved, nil
-		}
-		sub, ok := resolved[chart]
-		if !ok {
-			return Values{}, nil
-		}
-		subMap, ok := sub.(map[string]any)
-		if !ok {
-			return Values{}, nil
-		}
-		return Values{chart: Values(subMap)}, nil
+		return resolveTemplatedOverlay(raw, ctx), nil
 	}
 	vals, err := ReadValues(l.Path)
 	if err != nil {
@@ -93,12 +81,14 @@ func layerOverlay(l layers.Layer, ls []layers.Layer, ctx Values, chart string) (
 	if l.Kind != layers.KindVersions {
 		stripTemplated(vals)
 	}
-	return vals, nil
+	return subChart(vals, chart), nil
 }
 
 // mergeHumanRaw merges the human layers (chart defaults + env deltas) in order
 // WITHOUT stripping templates -- the raw view the contract layer resolves from.
-func mergeHumanRaw(ls []layers.Layer) (Values, error) {
+// Delta layers (platform/tenant/env/cluster) are scoped to chart before merging
+// so the contract layer only resolves templates for the queried chart.
+func mergeHumanRaw(ls []layers.Layer, chart string) (Values, error) {
 	raw := Values{}
 	for _, l := range ls {
 		if l.IsContract() || l.Kind == layers.KindVersions {
@@ -108,9 +98,27 @@ func mergeHumanRaw(ls []layers.Layer) (Values, error) {
 		if err != nil {
 			return nil, err
 		}
-		raw = helmutil.MergeTables(v, raw)
+		raw = helmutil.MergeTables(subChart(v, chart), raw)
 	}
 	return raw, nil
+}
+
+// subChart extracts the chart sub-map from vals and returns it wrapped under
+// the chart key. Returns an empty Values when chart is empty, the key is
+// absent, or the value is not a map.
+func subChart(vals Values, chart string) Values {
+	if chart == "" {
+		return vals
+	}
+	sub, ok := vals[chart]
+	if !ok {
+		return Values{}
+	}
+	subMap, ok := sub.(map[string]any)
+	if !ok {
+		return Values{}
+	}
+	return Values{chart: Values(subMap)}
 }
 
 // stripTemplated recursively deletes string leaves containing a Go-template ref
