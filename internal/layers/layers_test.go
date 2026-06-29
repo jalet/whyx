@@ -64,8 +64,8 @@ func TestResolve(t *testing.T) {
 				"envs/project/values.yaml",
 				"envs/project/dev/values.yaml",
 				"envs/project/dev/apps/values.yaml",
-				"envs/project/dev/apps/enabled/backend.yaml",
-				"envs/project/dev/apps/versions.generated.yaml",
+				"envs/project/dev/apps/platform.generated.yaml",
+				"envs/project/dev/apps/versions/backend.yaml",
 			},
 			chart: "backend",
 			wantKinds: []Kind{
@@ -74,11 +74,11 @@ func TestResolve(t *testing.T) {
 			},
 		},
 		{
-			name: "absent enabled file skips contract layer",
+			name: "absent platform.generated.yaml skips contract layer",
 			give: []string{
 				"charts/apps/backend/values.yaml",
 				"envs/project/dev/apps/values.yaml",
-				// no enabled/backend.yaml -- contract layer is skipped
+				// no platform.generated.yaml -- contract layer is skipped
 			},
 			chart:     "backend",
 			wantKinds: []Kind{KindChartDefaults, KindCluster},
@@ -88,7 +88,7 @@ func TestResolve(t *testing.T) {
 			give: []string{
 				"charts/apps/backend/values.yaml",
 				"envs/_platform/values.yaml",
-				"envs/project/dev/apps/versions.generated.yaml",
+				"envs/project/dev/apps/versions/backend.yaml",
 			},
 			chart:     "backend",
 			wantKinds: []Kind{KindChartDefaults, KindPlatform, KindVersions},
@@ -106,7 +106,7 @@ func TestResolve(t *testing.T) {
 			name: "category vendor",
 			give: []string{
 				"charts/vendor/some-app/values.yaml",
-				"envs/project/dev/apps/enabled/some-app.yaml",
+				"envs/project/dev/apps/platform.generated.yaml",
 			},
 			chart:     "some-app",
 			wantKinds: []Kind{KindChartDefaults, KindContract},
@@ -258,8 +258,8 @@ func wantLayers(root string, target Target, chart string, kinds []Kind) []Layer 
 		KindTenant:        filepath.Join(root, "envs", target.Tenant, "values.yaml"),
 		KindEnv:           filepath.Join(root, "envs", target.Tenant, target.Env, "values.yaml"),
 		KindCluster:       filepath.Join(clusterDir, "values.yaml"),
-		KindContract:      filepath.Join(clusterDir, "enabled", chart+".yaml"),
-		KindVersions:      filepath.Join(clusterDir, "versions.generated.yaml"),
+		KindContract:      filepath.Join(clusterDir, "platform.generated.yaml"),
+		KindVersions:      filepath.Join(clusterDir, "versions", chart+".yaml"),
 	}
 	want := make([]Layer, 0, len(kinds))
 	for _, k := range kinds {

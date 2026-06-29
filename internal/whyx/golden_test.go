@@ -14,13 +14,14 @@ var update = flag.Bool("update", false, "update golden files")
 // cascade against a committed golden file. Regenerate with `go test -update`.
 func TestGoldenCascade(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml":   "replicas: 1\nimage:\n  repo: app\n  tag: dev\n",
-		"envs/_platform/values.yaml":        "common: true\n",
-		"envs/project/dev/apps/values.yaml": "replicas: 2\n",
-		// Layer 6 is the per-chart infra contract projection: the chart's ArgoCD
-		// source manifest, from which only the named helmParameters get projected.
-		"envs/project/dev/apps/enabled/backend.yaml":    "helmParameters:\n  - name: image.registry\n    value: ecr.example\n",
-		"envs/project/dev/apps/versions.generated.yaml": "image:\n  tag: prod\n",
+		"charts/apps/backend/values.yaml": "replicas: 1\nimage:\n  repo: app\n  tag: dev\n",
+		"envs/_platform/values.yaml":      "common: true\n",
+		// The cluster layer sets image.registry from a contract template; the
+		// templated leaf is stripped from layer 5 and surfaces (resolved) at the
+		// computed infra-contract layer (layer 6), using platform.generated.yaml.
+		"envs/project/dev/apps/values.yaml":             "replicas: 2\nimage:\n  registry: \"{{ .registry }}\"\n",
+		"envs/project/dev/apps/platform.generated.yaml": "registry: ecr.example\n",
+		"envs/project/dev/apps/versions/backend.yaml":   "image:\n  tag: prod\n",
 	})
 
 	var out bytes.Buffer

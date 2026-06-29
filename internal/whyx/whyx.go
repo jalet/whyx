@@ -80,7 +80,16 @@ func Run(ctx context.Context, cfg Config, out io.Writer) error {
 		return writeLayers(out, resolved)
 	}
 
-	steps, err := merge.Cascade(resolved)
+	ctxPaths, err := layers.ContextPaths(repoRoot, target)
+	if err != nil {
+		return err
+	}
+	tmplCtx, err := merge.BuildContext(ctxPaths)
+	if err != nil {
+		return err
+	}
+
+	steps, err := merge.Cascade(resolved, tmplCtx)
 	if err != nil {
 		return err
 	}

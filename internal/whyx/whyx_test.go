@@ -19,8 +19,8 @@ func TestRunListLayers(t *testing.T) {
 		"envs/_platform/values.yaml",
 		"envs/project/values.yaml",
 		"envs/project/dev/apps/values.yaml",
-		"envs/project/dev/apps/enabled/backend.yaml",
-		"envs/project/dev/apps/versions.generated.yaml",
+		"envs/project/dev/apps/platform.generated.yaml",
+		"envs/project/dev/apps/versions/backend.yaml",
 	})
 
 	var out bytes.Buffer
@@ -110,14 +110,14 @@ func TestRunCancelledContext(t *testing.T) {
 func TestWriteLayers(t *testing.T) {
 	resolved := []layers.Layer{
 		{Kind: layers.KindChartDefaults, Path: "/repo/charts/apps/backend/values.yaml"},
-		{Kind: layers.KindContract, Path: "/repo/envs/c/e/cl/enabled/backend.yaml"},
+		{Kind: layers.KindContract, Path: "/repo/envs/c/e/cl/platform.generated.yaml"},
 	}
 	var out bytes.Buffer
 	if err := writeLayers(&out, resolved); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := "1  chart defaults    chart author     /repo/charts/apps/backend/values.yaml\n" +
-		"6  infra contract    Pulumi (machine) /repo/envs/c/e/cl/enabled/backend.yaml\n"
+		"6  infra contract    Pulumi (machine) /repo/envs/c/e/cl/platform.generated.yaml\n"
 	if out.String() != want {
 		t.Errorf("output mismatch:\nwant:\n%q\ngot:\n%q", want, out.String())
 	}
@@ -125,9 +125,9 @@ func TestWriteLayers(t *testing.T) {
 
 func TestRunCascade(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml":               "replicas: 1\nimage:\n  tag: dev\n",
-		"envs/project/dev/apps/values.yaml":             "replicas: 2\n",
-		"envs/project/dev/apps/versions.generated.yaml": "image:\n  tag: prod\n",
+		"charts/apps/backend/values.yaml":             "replicas: 1\nimage:\n  tag: dev\n",
+		"envs/project/dev/apps/values.yaml":           "replicas: 2\n",
+		"envs/project/dev/apps/versions/backend.yaml": "image:\n  tag: prod\n",
 	})
 	var out bytes.Buffer
 	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: repo}
@@ -167,9 +167,9 @@ func TestRunCascade(t *testing.T) {
 
 func TestRunCascadeFocused(t *testing.T) {
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/backend/values.yaml":               "replicas: 1\nimage:\n  tag: dev\n",
-		"envs/project/dev/apps/values.yaml":             "replicas: 2\n",
-		"envs/project/dev/apps/versions.generated.yaml": "image:\n  tag: prod\n",
+		"charts/apps/backend/values.yaml":             "replicas: 1\nimage:\n  tag: dev\n",
+		"envs/project/dev/apps/values.yaml":           "replicas: 2\n",
+		"envs/project/dev/apps/versions/backend.yaml": "image:\n  tag: prod\n",
 	})
 	var out bytes.Buffer
 	cfg := Config{Target: "project/dev/apps", Chart: "backend", RepoRoot: repo, Key: "image.tag"}
@@ -189,13 +189,12 @@ func TestRunCascadeFocused(t *testing.T) {
 }
 
 func TestRunNoHelmValueLayers(t *testing.T) {
-	// A raw-manifest (type: path) chart: no chart defaults, only empty delta
-	// files and an empty contract projection. The cascade sets nothing, so whyx
+	// A raw-manifest (type: path) chart: no chart defaults, only an empty delta
+	// file and no resolved contract file. The cascade sets nothing, so whyx
 	// prints the friendly no-layers message and exits 0 -- not an error.
 	repo := newContentFixture(t, map[string]string{
-		"charts/apps/echoserver/Chart.yaml":             "name: echoserver\n",
-		"envs/project/dev/apps/values.yaml":             "{}\n",
-		"envs/project/dev/apps/enabled/echoserver.yaml": "type: path\nhelmParameters: []\n",
+		"charts/apps/echoserver/Chart.yaml": "name: echoserver\n",
+		"envs/project/dev/apps/values.yaml": "{}\n",
 	})
 	var out bytes.Buffer
 	cfg := Config{Target: "project/dev/apps", Chart: "echoserver", RepoRoot: repo}

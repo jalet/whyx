@@ -61,7 +61,7 @@ func TestCascade(t *testing.T) {
 	l2 := layer(t, KindFor(2), "replicas: 2\nimage:\n  tag: stage\nextra: true\n")
 	l3 := layer(t, KindFor(3), "ports:\n  - 8080\n  - 8443\nimage:\n  tag: prod\n")
 
-	steps, err := Cascade([]layers.Layer{l1, l2, l3})
+	steps, err := Cascade([]layers.Layer{l1, l2, l3}, Values{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestCascadeSnapshotsAreStable(t *testing.T) {
 	l1 := layer(t, KindFor(1), "image:\n  repo: app\n  tag: dev\n")
 	l2 := layer(t, KindFor(2), "image:\n  tag: prod\n  extra: x\n")
 
-	steps, err := Cascade([]layers.Layer{l1, l2})
+	steps, err := Cascade([]layers.Layer{l1, l2}, Values{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestCascadeNullOverride(t *testing.T) {
 	// A later layer setting a key to null wins (value becomes nil).
 	l1 := layer(t, KindFor(1), "feature: enabled\n")
 	l2 := layer(t, KindFor(2), "feature: null\n")
-	steps, err := Cascade([]layers.Layer{l1, l2})
+	steps, err := Cascade([]layers.Layer{l1, l2}, Values{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,48 +126,78 @@ func TestCascadeNullOverride(t *testing.T) {
 	}
 }
 
-func TestCascadeContractProjection(t *testing.T) {
-	// Layer 6 is an ArgoCD source manifest; only its named helmParameters get
-	// projected, with dotted names expanded into nested maps and values kept as
-	// strings (Helm --set never type-coerces).
-	chart := layer(t, KindFor(1), "replicas: 2\n")
-	contract := contractLayer(t, "helmParameters:\n"+
-		"  - name: defaultBackupStore.backupTarget\n    value: s3://bucket@eu-north-1/\n"+
-		"  - name: replicaCount\n    value: \"3\"\n")
+func TestCascadeContractResolvesTemplates(t *testing.T) {
+	// The infra-contract layer is COMPUTED: it resolves the {{ }} refs in the
+	// human layers against the context and contributes only those resolved keys.
+	// The human layer's templated leaf is stripped (step 0); the resolved value
+	// appears at the contract layer (step 1).
+	human := layer(t, KindFor(5), "replicas: 2\nbackup:\n  target: \"s3://{{ .buckets.x }}@{{ .global.region }}/\"\n")
+	ctx := Values{"buckets": Values{"x": "bkt"}, "global": Values{"region": "eu-north-1"}}
 
-	steps, err := Cascade([]layers.Layer{chart, contract})
+	steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Values{
-		"replicas":           float64(2),
-		"defaultBackupStore": Values{"backupTarget": "s3://bucket@eu-north-1/"},
-		"replicaCount":       "3",
+	if diff := cmp.Diff(Values{"replicas": float64(2)}, steps[0].Values); diff != "" {
+		t.Errorf("human layer should strip template (-want +got):\n%s", diff)
 	}
+	want := Values{"replicas": float64(2), "backup": Values{"target": "s3://bkt@eu-north-1/"}}
 	if diff := cmp.Diff(want, steps[1].Values); diff != "" {
-		t.Errorf("projection mismatch (-want +got):\n%s", diff)
+		t.Errorf("contract layer should add resolved value (-want +got):\n%s", diff)
 	}
 }
 
-func TestCascadeContractProjectionEmpty(t *testing.T) {
-	// A chart that names no helmParameters (echoserver, mimir) contributes
-	// nothing from the contract layer. Empty and absent lists both yield {}.
-	for name, body := range map[string]string{
-		"empty list":   "helmParameters: []\n",
-		"missing list": "type: path\nname: echoserver\n",
-		"empty file":   "",
-	} {
-		t.Run(name, func(t *testing.T) {
-			chart := layer(t, KindFor(1), "replicas: 2\n")
-			contract := contractLayer(t, body)
-			steps, err := Cascade([]layers.Layer{chart, contract})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if diff := cmp.Diff(Values{"replicas": float64(2)}, steps[1].Values); diff != "" {
-				t.Errorf("contract should contribute nothing (-want +got):\n%s", diff)
-			}
-		})
+func TestCascadeContractEmpty(t *testing.T) {
+	// No templated refs in the human layers -> the contract layer contributes
+	// nothing (and an unresolved ref is left intact when ctx lacks the key).
+	t.Run("no templates", func(t *testing.T) {
+		human := layer(t, KindFor(5), "replicas: 2\n")
+		steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, Values{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if diff := cmp.Diff(Values{"replicas": float64(2)}, steps[1].Values); diff != "" {
+			t.Errorf("contract should contribute nothing (-want +got):\n%s", diff)
+		}
+	})
+	t.Run("unresolved ref left intact", func(t *testing.T) {
+		human := layer(t, KindFor(5), "target: \"{{ .missing.key }}\"\n")
+		steps, err := Cascade([]layers.Layer{human, contractLayer(t)}, Values{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if diff := cmp.Diff(Values{"target": "{{ .missing.key }}"}, steps[1].Values); diff != "" {
+			t.Errorf("unresolved ref should stay intact (-want +got):\n%s", diff)
+		}
+	})
+}
+
+func TestCascadeStripsTemplatedHumanLayers(t *testing.T) {
+	// A human layer that sets a key to a contract template has that leaf stripped
+	// (and any map left empty pruned), so the unresolved placeholder never shows
+	// at the human layer.
+	human := layer(t, KindFor(5), "image:\n  tag: v1\nbackup:\n  target: \"s3://{{ .buckets.x }}/\"\n")
+	steps, err := Cascade([]layers.Layer{human}, Values{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Values{"image": Values{"tag": "v1"}}
+	if diff := cmp.Diff(want, steps[0].Values); diff != "" {
+		t.Errorf("templated leaf should be stripped (-want +got):\n%s", diff)
+	}
+}
+
+func TestBuildContext(t *testing.T) {
+	// Later files win: the contract (platform.generated.yaml) overlays globals.
+	globals := writeFile(t, "globals.yaml", "global:\n  region: old\nextra: keep\n")
+	contract := writeFile(t, "platform.generated.yaml", "global:\n  region: eu-north-1\n")
+	ctx, err := BuildContext([]string{globals, contract})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Values{"global": Values{"region": "eu-north-1"}, "extra": "keep"}
+	if diff := cmp.Diff(want, ctx); diff != "" {
+		t.Errorf("context mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -205,11 +235,12 @@ func layer(t *testing.T, kind layers.Kind, body string) layers.Layer {
 	return layers.Layer{Kind: kind, Path: writeFile(t, name, body)}
 }
 
-// contractLayer builds a KindContract layer whose file is an ArgoCD source
-// manifest (the body), so Cascade projects its helmParameters.
-func contractLayer(t *testing.T, body string) layers.Layer {
+// contractLayer builds the computed KindContract layer. Its Path is only a
+// presence marker (platform.generated.yaml); Cascade computes the overlay from
+// the human layers' templates + the context, not from this file.
+func contractLayer(t *testing.T) layers.Layer {
 	t.Helper()
-	return layers.Layer{Kind: layers.KindContract, Path: writeFile(t, "enabled-chart.yaml", body)}
+	return layers.Layer{Kind: layers.KindContract, Path: "platform.generated.yaml"}
 }
 
 func writeFile(t *testing.T, name, body string) string {
