@@ -1,8 +1,8 @@
 @@ layer 2 · platform-wide · platform team @@
   + common: true
 @@ layer 5 · cluster · platform team @@
-  ~ replicas: 1 -> 2
+  ~ backend.replicas: 1 -> 2
 @@ layer 6 · infra contract · Pulumi (machine) @@
-  + image.registry: ecr.example
+  + backend.image.registry: ecr.example
 @@ layer 7 · promoted versions · Kargo (machine) @@
-  ~ image.tag: dev -> prod
+  ~ backend.image.tag: dev -> prod

@@ -89,7 +89,7 @@ func Run(ctx context.Context, cfg Config, out io.Writer) error {
 		return err
 	}
 
-	steps, err := merge.Cascade(resolved, tmplCtx)
+	steps, err := merge.Cascade(resolved, tmplCtx, cfg.Chart)
 	if err != nil {
 		return err
 	}

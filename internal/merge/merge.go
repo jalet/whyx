@@ -38,11 +38,11 @@ type Step struct {
 //
 // Snapshots are read-only: later steps may share unmodified submaps with
 // earlier ones, so callers must not mutate Step.Values.
-func Cascade(ls []layers.Layer, ctx Values) ([]Step, error) {
+func Cascade(ls []layers.Layer, ctx Values, chart string) ([]Step, error) {
 	steps := make([]Step, 0, len(ls))
 	cumulative := Values{}
 	for _, l := range ls {
-		overlay, err := layerOverlay(l, ls, ctx)
+		overlay, err := layerOverlay(l, ls, ctx, chart)
 		if err != nil {
 			return nil, err
 		}
@@ -66,13 +66,25 @@ func Cascade(ls []layers.Layer, ctx Values) ([]Step, error) {
 // human layers' templates; layer 7 keys are version pins (image tags). The two
 // key sets are disjoint, so no value is ever set by both and the layer-6-before-7
 // ordering shows no inversion.
-func layerOverlay(l layers.Layer, ls []layers.Layer, ctx Values) (Values, error) {
+func layerOverlay(l layers.Layer, ls []layers.Layer, ctx Values, chart string) (Values, error) {
 	if l.IsContract() {
 		raw, err := mergeHumanRaw(ls)
 		if err != nil {
 			return nil, err
 		}
-		return resolveTemplatedOverlay(raw, ctx), nil
+		resolved := resolveTemplatedOverlay(raw, ctx)
+		if chart == "" {
+			return resolved, nil
+		}
+		sub, ok := resolved[chart]
+		if !ok {
+			return Values{}, nil
+		}
+		subMap, ok := sub.(map[string]any)
+		if !ok {
+			return Values{}, nil
+		}
+		return Values{chart: Values(subMap)}, nil
 	}
 	vals, err := ReadValues(l.Path)
 	if err != nil {
