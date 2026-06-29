@@ -65,6 +65,10 @@ func Run(ctx context.Context, cfg Config, out io.Writer) error {
 		if repoRoot, err = layers.FindRepoRoot(cwd); err != nil {
 			return err
 		}
+	} else if err := layers.CheckRepoRoot(repoRoot); err != nil {
+		// An explicit --repo is trusted as-is; verify it actually is a repo root
+		// so a wrong path fails clearly rather than as "chart not found".
+		return err
 	}
 
 	resolved, err := layers.Resolve(repoRoot, target, cfg.Chart)
@@ -76,7 +80,16 @@ func Run(ctx context.Context, cfg Config, out io.Writer) error {
 		return writeLayers(out, resolved)
 	}
 
-	steps, err := merge.Cascade(resolved)
+	ctxPaths, err := layers.ContextPaths(repoRoot, target)
+	if err != nil {
+		return err
+	}
+	tmplCtx, err := merge.BuildContext(ctxPaths)
+	if err != nil {
+		return err
+	}
+
+	steps, err := merge.Cascade(resolved, tmplCtx)
 	if err != nil {
 		return err
 	}

@@ -1,8 +1,9 @@
 // Package layers resolves the ordered set of value-file layers for a given
 // (target, chart): the chart defaults under charts/<category>/<chart>, the
-// envs/ delta files (_platform, tenant, env, cluster), the per-chart infra
-// contract projection (enabled/<chart>.yaml, Pulumi) and the machine-owned
-// versions.generated.yaml (Kargo). Missing files are skipped, since the delta
+// envs/ delta files (_platform, tenant, env, cluster), the infra contract
+// (computed by the merge package from the env layers' {{ }} templates against
+// platform.generated.yaml, Pulumi) and the machine-owned per-chart version pin
+// (versions/<chart>.yaml, Kargo). Missing files are skipped, since the delta
 // layers are often absent.
 package layers
 
@@ -101,11 +102,12 @@ type Layer struct {
 	Path string
 }
 
-// IsContractProjection reports whether the layer's file is the per-chart infra
-// contract (enabled/<chart>.yaml). Such a file is not raw values: it is an
-// ArgoCD source manifest whose .helmParameters must be projected into a value
-// overlay. The merge package materializes it accordingly.
-func (l Layer) IsContractProjection() bool { return l.Kind == KindContract }
+// IsContract reports whether the layer is the infra-contract layer. This layer
+// is COMPUTED, not a file overlay: the merge package resolves the env layers'
+// {{ }} template refs (e.g. {{ .buckets.longhorn }}) against the contract context
+// (see ContextPaths) and surfaces the resolved values here. The layer's Path is
+// platform.generated.yaml, used only for the presence check and --list-layers.
+func (l Layer) IsContract() bool { return l.Kind == KindContract }
 
 // IsChartDefaults reports whether the layer is the chart author's values.yaml
 // (charts/<category>/<chart>/values.yaml), the lowest-precedence layer.
@@ -152,13 +154,15 @@ func Resolve(repoRoot string, target Target, chart string) ([]Layer, error) {
 		{KindTenant, filepath.Join(repoRoot, "envs", target.Tenant, "values.yaml")},
 		{KindEnv, filepath.Join(repoRoot, "envs", target.Tenant, target.Env, "values.yaml")},
 		{KindCluster, filepath.Join(clusterDir, "values.yaml")},
-		// Layer 6 is a PER-CHART projection of the infra contract, not the whole
-		// platform.generated.yaml bag. It reads the chart's ArgoCD source manifest
-		// (enabled/<chart>.yaml) and projects only the .helmParameters that this
-		// chart actually consumes -- exactly what ArgoCD --sets. The merge package
-		// materializes the projection (see IsContractProjection).
-		{KindContract, filepath.Join(clusterDir, "enabled", chart+".yaml")},
-		{KindVersions, filepath.Join(clusterDir, "versions.generated.yaml")},
+		// Layer 6 is the infra contract -- COMPUTED, not a file overlay: the merge
+		// package resolves the {{ }} template refs in the env values.yaml layers
+		// (e.g. {{ .buckets.longhorn }}) against the contract context (the
+		// globals.yaml chain overlaid by platform.generated.yaml) and surfaces the
+		// resolved values here. The path below only gates the layer's presence and
+		// labels it in --list-layers. See ContextPaths and merge.Cascade.
+		{KindContract, filepath.Join(clusterDir, "platform.generated.yaml")},
+		// Layer 7 is the per-chart, Kargo-owned image version pin.
+		{KindVersions, filepath.Join(clusterDir, "versions", chart+".yaml")},
 	}
 
 	resolved := make([]Layer, 0, len(candidates))
@@ -175,6 +179,45 @@ func Resolve(repoRoot string, target Target, chart string) ([]Layer, error) {
 		return nil, fmt.Errorf("%s chart %q: %w", target, chart, ErrNoLayers)
 	}
 	return resolved, nil
+}
+
+// ContextPaths returns the existing template-context source files for target, in
+// deep-merge order (lowest precedence first): the globals.yaml chain (_platform <
+// tenant < env < cluster) followed by the infra contract platform.generated.yaml,
+// which is overlaid last and wins on any leaf collision. Absent files are skipped.
+// The merge package builds the context from these to resolve the {{ }} refs in the
+// env values layers (the computed infra-contract layer).
+func ContextPaths(repoRoot string, target Target) ([]string, error) {
+	clusterDir := filepath.Join(repoRoot, "envs", target.Tenant, target.Env, target.Cluster)
+	candidates := []string{
+		filepath.Join(repoRoot, "envs", "_platform", "globals.yaml"),
+		filepath.Join(repoRoot, "envs", target.Tenant, "globals.yaml"),
+		filepath.Join(repoRoot, "envs", target.Tenant, target.Env, "globals.yaml"),
+		filepath.Join(clusterDir, "globals.yaml"),
+		filepath.Join(clusterDir, "platform.generated.yaml"),
+	}
+	out := make([]string, 0, len(candidates))
+	for _, p := range candidates {
+		ok, err := isRegularFile(p)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// CheckRepoRoot verifies that root is a helm-charts repo root: a directory
+// holding both charts/ and envs/. Use it to validate an explicitly supplied
+// --repo path, which -- unlike FindRepoRoot's auto-detection -- is otherwise
+// trusted blindly, turning a wrong path into a misleading "chart not found".
+func CheckRepoRoot(root string) error {
+	if dirExists(filepath.Join(root, "charts")) && dirExists(filepath.Join(root, "envs")) {
+		return nil
+	}
+	return fmt.Errorf("%q: %w", root, ErrRepoNotFound)
 }
 
 // FindRepoRoot walks up from start until it finds a directory containing both
