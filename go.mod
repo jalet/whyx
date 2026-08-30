@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/google/go-cmp v0.7.0
 	github.com/spf13/cobra v1.10.2
-	helm.sh/helm/v4 v4.2.3
+	helm.sh/helm/v4 v4.2.4
 	sigs.k8s.io/yaml v1.6.0
 )
 
