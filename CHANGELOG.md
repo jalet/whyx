@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/jalet/whyx/compare/v0.2.2...v0.2.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update module helm.sh/helm/v4 to v4.3.1 ([#28](https://github.com/jalet/whyx/issues/28)) ([974a1bb](https://github.com/jalet/whyx/commit/974a1bbf91dc5559ad9cd34541e0f9b1c01de13f))
+
 ## [0.2.2](https://github.com/jalet/whyx/compare/v0.2.1...v0.2.2) (2026-10-02)
 
 
